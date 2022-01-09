@@ -1,3 +1,5 @@
+extern crate tokio;
+
 use core::mem;
 
 use tokio::io::AsyncReadExt;
