@@ -2,7 +2,6 @@ extern crate tokio;
 
 use core::mem;
 use std::collections::VecDeque;
-use std::ops::{Deref, DerefMut};
 
 use tokio::io::AsyncReadExt;
 use tokio::io::Result as IoResult;
@@ -15,7 +14,6 @@ const NAL_UNIT_PREFIX_NULL_BYTES: usize = 2;
 ///   - Splits the h.264 stream into its constituent NAL units so implementers can split/stitch NAL units at the stream level
 pub struct H264Stream<R> {
 	reader: R,
-	start: usize,
 	byte_buf: Vec<u8>,
 	nulls: usize,
 	unit_buf: VecDeque<H264NalUnit>,
@@ -26,7 +24,6 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	pub fn new(reader: R) -> Self {
 		H264Stream {
 			reader,
-			start: 0,
 			byte_buf: Vec::with_capacity(4 << 20),
 			nulls: 0,
 			unit_buf: VecDeque::new(),
@@ -42,7 +39,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 				return Ok(x);
 			}
 
-			let mut start = self.byte_buf.len();
+			let start = self.byte_buf.len();
 			let count = self.reader.read_buf(&mut self.byte_buf).await?;
 
 			// Skip reading the headers at the start of iteration
@@ -86,7 +83,7 @@ pub struct H264NalUnit {
 
 impl H264NalUnit {
 	/// Constructs a new NAL unit from the raw bytes (interpret the unicode and store the bytes)
-	pub fn new(mut raw_bytes: Vec<u8>) -> Self {
+	pub fn new(raw_bytes: Vec<u8>) -> Self {
 		H264NalUnit {
 			// There's 32 possible NAL unit codes for H264
 			unit_code: 0x1f & raw_bytes[3],
