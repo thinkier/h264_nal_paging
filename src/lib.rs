@@ -71,7 +71,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 					// Move to the start (with allocation)
 					{
 						let mut buffered = Vec::with_capacity(end - last_frame_end);
-						buffered.extend(&self.buffer[last_frame_end..]);
+						buffered.extend(&self.buffer[last_frame_end..end]);
 						self.buffer.clear();
 						self.buffer.extend(&buffered);
 					}
