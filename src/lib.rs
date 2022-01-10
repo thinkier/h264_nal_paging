@@ -1,6 +1,7 @@
 extern crate tokio;
 
 use core::mem;
+use std::collections::LinkedList;
 
 use tokio::io::AsyncReadExt;
 use tokio::io::Result as IoResult;
@@ -14,6 +15,7 @@ const NAL_UNIT_PREFIX_NULL_BYTES: usize = 2;
 pub struct H264Stream<R> {
 	reader: R,
 	buffer: Vec<u8>,
+	unit_buffer: LinkedList<H264NalUnit>,
 	nal_unit_detect: usize,
 }
 
@@ -24,6 +26,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 			reader,
 			// initial 4MiB buffer
 			buffer: Vec::with_capacity(4 << 20),
+			unit_buffer: LinkedList::new(),
 			nal_unit_detect: 0,
 		}
 	}
@@ -33,6 +36,10 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	/// It always returns a NAL unit that only has 2 leading null bytes
 	pub async fn next(&mut self) -> IoResult<H264NalUnit> {
 		loop {
+			if let Some(unit) = self.unit_buffer.pop_front() {
+				return Ok(unit);
+			}
+
 			let read = self.reader.read_buf(&mut self.buffer).await?;
 			let end = self.buffer.len();
 			let start = end - read;
@@ -44,10 +51,10 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 				}
 
 				// Some encoder implementations write more than 2 null bytes
-				let is_nal_unit = self.nal_unit_detect >= NAL_UNIT_PREFIX_NULL_BYTES && self.buffer[i] == 0x01;
+				let is_nal_header = self.nal_unit_detect >= NAL_UNIT_PREFIX_NULL_BYTES && self.buffer[i] == 0x01;
 				let nal_unit_detect = mem::replace(&mut self.nal_unit_detect, 0);
 
-				if is_nal_unit {
+				if is_nal_header {
 					// Side effect of this is that the nal units emitted here always only has 2 leading null bytes
 					let last_frame_end = i - nal_unit_detect;
 					// If we're at the start of the h264 stream there's no previous unit to emit
@@ -69,14 +76,14 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 						self.buffer.extend(&buffered);
 					}
 
-					return Ok(H264NalUnit::new(nal_unit));
+					self.unit_buffer.push_back(H264NalUnit::new(nal_unit));
 				}
 			}
 		}
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct H264NalUnit {
 	/// The NAL unit code for this current unit (values are 0-31 inclusive)
 	///
