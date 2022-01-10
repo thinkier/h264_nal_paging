@@ -40,9 +40,9 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 				return Ok(unit);
 			}
 
+			let start = self.buffer.len();
 			let read = self.reader.read_buf(&mut self.buffer).await?;
-			let end = self.buffer.len();
-			let start = end - read;
+			let end = start + read;
 			for i in start..end {
 				// H264 NAL Unit Header is 0x000001 https://stackoverflow.com/a/2861340/8835688
 				if self.buffer[i] == 0x00 {
