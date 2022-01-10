@@ -35,15 +35,16 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	///
 	/// It always returns a NAL unit that only has 2 leading null bytes
 	pub async fn next(&mut self) -> IoResult<H264NalUnit> {
-		loop {
+		loop {cu
 			if let Some(unit) = self.unit_buffer.pop_front() {
 				return Ok(unit);
 			}
 
-			let start = self.buffer.len();
+			let mut start = self.buffer.len();
 			let read = self.reader.read_buf(&mut self.buffer).await?;
-			let end = start + read;
-			for i in start..end {
+			for i in 0..read {
+				let i = start + i;
+
 				// H264 NAL Unit Header is 0x000001 https://stackoverflow.com/a/2861340/8835688
 				if self.buffer[i] == 0x00 {
 					self.nal_unit_detect += 1;
@@ -51,7 +52,8 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 				}
 
 				// Some encoder implementations write more than 2 null bytes
-				let is_nal_header = self.nal_unit_detect >= NAL_UNIT_PREFIX_NULL_BYTES && self.buffer[i] == 0x01;
+				let is_nal_header = self.nal_unit_detect >= NAL_UNIT_PREFIX_NULL_BYTES
+					&& self.buffer[i] == 0x01;
 				let nal_unit_detect = mem::replace(&mut self.nal_unit_detect, 0);
 
 				if is_nal_header {
@@ -77,6 +79,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 					}
 
 					self.unit_buffer.push_back(H264NalUnit::new(nal_unit));
+					start = 0;
 				}
 			}
 		}
