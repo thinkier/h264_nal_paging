@@ -1,7 +1,6 @@
 extern crate tokio;
 
 use core::mem;
-use std::collections::LinkedList;
 
 use tokio::io::AsyncReadExt;
 use tokio::io::Result as IoResult;
@@ -15,8 +14,8 @@ const NAL_UNIT_PREFIX_NULL_BYTES: usize = 2;
 pub struct H264Stream<R> {
 	reader: R,
 	buffer: Vec<u8>,
-	unit_buffer: LinkedList<H264NalUnit>,
 	nal_unit_detect: usize,
+	cursor: usize,
 }
 
 impl<R: AsyncReadExt + Unpin> H264Stream<R> {
@@ -26,8 +25,8 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 			reader,
 			// initial 4MiB buffer
 			buffer: Vec::with_capacity(4 << 20),
-			unit_buffer: LinkedList::new(),
 			nal_unit_detect: 0,
+			cursor: 0,
 		}
 	}
 
@@ -36,14 +35,10 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	/// It always returns a NAL unit that only has 2 leading null bytes
 	pub async fn next(&mut self) -> IoResult<H264NalUnit> {
 		loop {
-			if let Some(unit) = self.unit_buffer.pop_front() {
-				return Ok(unit);
-			}
-
-			let mut start = self.buffer.len();
 			let read = self.reader.read_buf(&mut self.buffer).await?;
-			for i in 0..read {
-				let i = start + i;
+			for _ in 0..read {
+				let mut i = self.cursor + 1;
+				mem::swap(&mut self.cursor, &mut i);
 
 				// H264 NAL Unit Header is 0x000001 https://stackoverflow.com/a/2861340/8835688
 				if self.buffer[i] == 0x00 {
@@ -78,9 +73,9 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 						self.buffer.clear();
 						self.buffer.extend(&buffered);
 					}
+					self.cursor = 0;
 
-					self.unit_buffer.push_back(H264NalUnit::new(nal_unit));
-					start = 0;
+					return Ok(H264NalUnit::new(nal_unit));
 				}
 			}
 		}
@@ -108,3 +103,6 @@ impl H264NalUnit {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,7 +1,7 @@
 [package]
 name = "h264_nal_paging"
 description = "H.264 stream paging tool for tokio"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 license = "MIT"
 repository="https://github.com/thinkier/h264_nal_paging"
@@ -13,3 +13,6 @@ documentation="https://docs.rs/h264_nal_paging"
 features = ["io-util"]
 default-features = false
 version = "1"
+
+[features]
+test = ["tokio/full"]
