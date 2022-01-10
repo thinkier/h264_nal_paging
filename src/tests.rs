@@ -1,22 +1,55 @@
+use std::sync::mpsc::channel;
+use std::time::Duration;
+
+use tokio::time::interval;
+
 use crate::H264Stream;
 
 #[tokio::test]
-async fn scan_over_file() {
-	let stream = tokio::fs::OpenOptions::new()
-		.read(true)
-		.open("./test.h264")
-		.await
-		.unwrap();
+async fn no_encapsulated_units() {
+	let (tx, rx) = channel();
 
-	let mut h264 = H264Stream::new(stream);
+	let hand = tokio::spawn(async move {
+		let stream = tokio::fs::OpenOptions::new()
+			.read(true)
+			.open("./test.h264")
+			.await
+			.unwrap();
 
-	while let Ok(nal) = h264.next().await {
-		print!("{}", nal.unit_code);
+		let mut h264 = H264Stream::new(stream);
 
-		if nal.unit_code == 7 || nal.unit_code == 8 {
-			println!(": {:?}", nal);
-		}else{
-			println!();
+		while let Ok(nal) = h264.next().await {
+			let mut nulls = 0;
+			nal.raw_bytes.iter().skip(3).for_each(|byte| {
+				if *byte == 0x00 {
+					nulls += 1;
+				} else if nulls >= 2 && *byte == 0x01 {
+					let _ = tx.send(true);
+				} else {
+					nulls = 0;
+				}
+			});
+			let _ = tx.send(false);
+		}
+	});
+
+	let mut int = interval(Duration::from_millis(500));
+
+	loop {
+		int.tick().await;
+		let mut received = false;
+		while let Ok(x) = rx.try_recv() {
+			if x {
+				hand.abort();
+				panic!("Detected unit within unit; Parser isn't working as intended.");
+			}
+			received = true;
+		}
+
+		if !received {
+			// Timeout exit
+			hand.abort();
+			return;
 		}
 	}
 }

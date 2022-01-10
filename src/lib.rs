@@ -1,6 +1,8 @@
 extern crate tokio;
 
 use core::mem;
+use std::collections::VecDeque;
+use std::ops::{Deref, DerefMut};
 
 use tokio::io::AsyncReadExt;
 use tokio::io::Result as IoResult;
@@ -13,9 +15,10 @@ const NAL_UNIT_PREFIX_NULL_BYTES: usize = 2;
 ///   - Splits the h.264 stream into its constituent NAL units so implementers can split/stitch NAL units at the stream level
 pub struct H264Stream<R> {
 	reader: R,
-	buffer: Vec<u8>,
-	nal_unit_detect: usize,
-	cursor: usize,
+	start: usize,
+	byte_buf: Vec<u8>,
+	nulls: usize,
+	unit_buf: VecDeque<H264NalUnit>,
 }
 
 impl<R: AsyncReadExt + Unpin> H264Stream<R> {
@@ -23,10 +26,10 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	pub fn new(reader: R) -> Self {
 		H264Stream {
 			reader,
-			// initial 4MiB buffer
-			buffer: Vec::with_capacity(4 << 20),
-			nal_unit_detect: 0,
-			cursor: 0,
+			start: 0,
+			byte_buf: Vec::with_capacity(4 << 20),
+			nulls: 0,
+			unit_buf: VecDeque::new(),
 		}
 	}
 
@@ -35,47 +38,35 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	/// It always returns a NAL unit that only has 2 leading null bytes
 	pub async fn next(&mut self) -> IoResult<H264NalUnit> {
 		loop {
-			let read = self.reader.read_buf(&mut self.buffer).await?;
-			for _ in 0..read {
-				let mut i = self.cursor + 1;
-				mem::swap(&mut self.cursor, &mut i);
+			if let Some(x) = self.unit_buf.pop_front() {
+				return Ok(x);
+			}
 
-				// H264 NAL Unit Header is 0x000001 https://stackoverflow.com/a/2861340/8835688
-				if self.buffer[i] == 0x00 {
-					self.nal_unit_detect += 1;
+			let mut start = self.byte_buf.len();
+			let count = self.reader.read_buf(&mut self.byte_buf).await?;
+
+			// Skip reading the headers at the start of iteration
+			let mut offset = 0;
+			for i in 0..count {
+				let i = start + i - offset;
+				if self.byte_buf[i] == 0x00 {
+					self.nulls += 1;
 					continue;
 				}
 
-				// Some encoder implementations write more than 2 null bytes
-				let is_nal_header = self.nal_unit_detect >= NAL_UNIT_PREFIX_NULL_BYTES
-					&& self.buffer[i] == 0x01;
-				let nal_unit_detect = mem::replace(&mut self.nal_unit_detect, 0);
+				let nulls = mem::replace(&mut self.nulls, 0);
+				if nulls >= NAL_UNIT_PREFIX_NULL_BYTES && self.byte_buf[i] == 0x01 {
+					let start = nulls - NAL_UNIT_PREFIX_NULL_BYTES;
+					let end = i - nulls;
 
-				if is_nal_header {
-					// Side effect of this is that the nal units emitted here always only has 2 leading null bytes
-					let last_frame_end = i - nal_unit_detect;
-					// If we're at the start of the h264 stream there's no previous unit to emit
-					if last_frame_end == 0 {
-						continue;
+					if end > 0 {
+						let (unit, retain) = self.byte_buf.split_at(end);
+						let retain = Vec::from(retain);
+						self.unit_buf.push_back(H264NalUnit::new(Vec::from(&unit[start..])));
+						self.byte_buf.clear();
+						self.byte_buf.extend(retain);
+						offset += end;
 					}
-
-					// Extract NAL unit
-					let last_frame_start = nal_unit_detect - NAL_UNIT_PREFIX_NULL_BYTES;
-					let mut nal_unit = Vec::with_capacity(last_frame_end);
-					nal_unit.extend(&self.buffer[last_frame_start..last_frame_end]);
-
-
-					// Move to the start (with allocation)
-					{
-						let end = self.buffer.len();
-						let mut buffered = Vec::with_capacity(end - last_frame_end);
-						buffered.extend(&self.buffer[last_frame_end..end]);
-						self.buffer.clear();
-						self.buffer.extend(&buffered);
-					}
-					self.cursor = 0;
-
-					return Ok(H264NalUnit::new(nal_unit));
 				}
 			}
 		}
@@ -95,7 +86,7 @@ pub struct H264NalUnit {
 
 impl H264NalUnit {
 	/// Constructs a new NAL unit from the raw bytes (interpret the unicode and store the bytes)
-	pub fn new(raw_bytes: Vec<u8>) -> Self {
+	pub fn new(mut raw_bytes: Vec<u8>) -> Self {
 		H264NalUnit {
 			// There's 32 possible NAL unit codes for H264
 			unit_code: 0x1f & raw_bytes[3],
