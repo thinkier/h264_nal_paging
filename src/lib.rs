@@ -35,7 +35,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	///
 	/// It always returns a NAL unit that only has 2 leading null bytes
 	pub async fn next(&mut self) -> IoResult<H264NalUnit> {
-		loop {cu
+		loop {
 			if let Some(unit) = self.unit_buffer.pop_front() {
 				return Ok(unit);
 			}
@@ -72,6 +72,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 
 					// Move to the start (with allocation)
 					{
+						let end = self.buffer.len();
 						let mut buffered = Vec::with_capacity(end - last_frame_end);
 						buffered.extend(&self.buffer[last_frame_end..end]);
 						self.buffer.clear();
