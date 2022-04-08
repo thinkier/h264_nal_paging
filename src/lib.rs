@@ -20,11 +20,6 @@ pub struct H264Stream<R> {
 }
 
 impl<R: AsyncReadExt + Unpin> H264Stream<R> {
-	/// Reads upstream into an internal buffer
-	async fn read_buf(&mut self) -> IoResult<usize> {
-		self.reader.read_buf(&mut self.byte_buf).await
-	}
-
 	/// Constructs the h264 stream reader from an existing tokio async reader, and allocates 4MiB to an internal buffer
 	pub fn new(reader: R) -> Self {
 		H264Stream {
@@ -55,7 +50,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 		}
 
 		let start = self.byte_buf.len();
-		let count = self.read_buf().await?;
+		let count = self.reader.read_buf(&mut self.byte_buf).await;
 
 		// Skip reading the headers at the start of iteration
 		let mut offset = 0;
