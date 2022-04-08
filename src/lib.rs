@@ -50,7 +50,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 		}
 
 		let start = self.byte_buf.len();
-		let count = self.reader.read_buf(&mut self.byte_buf).await;
+		let count = self.reader.read_buf(&mut self.byte_buf).await?;
 
 		// Skip reading the headers at the start of iteration
 		let mut offset = 0;
