@@ -7,6 +7,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::Result as IoResult;
 
 const NAL_UNIT_PREFIX_NULL_BYTES: usize = 2;
+const READ_BEHIND: usize = NAL_UNIT_PREFIX_NULL_BYTES;
 
 /// H.264 stream reader from tokio
 ///
@@ -63,7 +64,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 			let i = start + i - offset;
 			if self.byte_buf[i] == 0x00 {
 				self.nulls += 1;
-				return Ok(None);
+				continue;
 			}
 
 			let nulls = mem::replace(&mut self.nulls, 0);
