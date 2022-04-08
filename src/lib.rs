@@ -1,3 +1,5 @@
+#[macro_use]
+extern crate log;
 extern crate tokio;
 
 use core::mem;
@@ -46,6 +48,7 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	/// It always returns a NAL unit that only has 2 leading null bytes
 	pub async fn try_next(&mut self) -> IoResult<Option<H264NalUnit>> {
 		if let Some(x) = self.unit_buf.pop_front() {
+			debug!("Popped cached nal unit");
 			return Ok(Some(x));
 		}
 
@@ -69,9 +72,9 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 				if end > 0 {
 					let (unit, retain) = self.byte_buf.split_at(end);
 					let retain = Vec::from(retain);
+					debug!("Pushed a nal unit into buffer");
 					self.unit_buf.push_back(H264NalUnit::new(Vec::from(&unit[start..])));
-					self.byte_buf.clear();
-					self.byte_buf.extend(retain);
+					self.byte_buf = Vec::from(retain);
 					offset += end;
 				}
 			}
