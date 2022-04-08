@@ -18,18 +18,20 @@ async fn no_encapsulated_units() {
 
 		let mut h264 = H264Stream::new(stream);
 
-		while let Ok(nal) = h264.next().await {
-			let mut nulls = 0;
-			nal.raw_bytes.iter().skip(3).for_each(|byte| {
-				if *byte == 0x00 {
-					nulls += 1;
-				} else if nulls >= 2 && *byte == 0x01 {
-					let _ = tx.send(true);
-				} else {
-					nulls = 0;
-				}
-			});
-			let _ = tx.send(false);
+		while let Ok(unit) = h264.try_next().await {
+			if let Some(nal) = unit {
+				let mut nulls = 0;
+				nal.raw_bytes.iter().skip(3).for_each(|byte| {
+					if *byte == 0x00 {
+						nulls += 1;
+					} else if nulls >= 2 && *byte == 0x01 {
+						let _ = tx.send(true);
+					} else {
+						nulls = 0;
+					}
+				});
+				let _ = tx.send(false);
+			}
 		}
 	});
 

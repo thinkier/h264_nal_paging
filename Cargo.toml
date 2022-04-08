@@ -10,7 +10,7 @@ documentation = "https://docs.rs/h264_nal_paging"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = "*"
+log = "^0.4"
 
 [dependencies.tokio]
 features = ["io-util"]
