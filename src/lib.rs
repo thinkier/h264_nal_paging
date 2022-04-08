@@ -20,6 +20,11 @@ pub struct H264Stream<R> {
 }
 
 impl<R: AsyncReadExt + Unpin> H264Stream<R> {
+	/// Reads upstream into an internal buffer
+	async fn read_buf(&mut self) -> IoResult<usize> {
+		self.reader.read_buf(&mut self.byte_buf).await
+	}
+
 	/// Constructs the h264 stream reader from an existing tokio async reader, and allocates 4MiB to an internal buffer
 	pub fn new(reader: R) -> Self {
 		H264Stream {
@@ -35,38 +40,49 @@ impl<R: AsyncReadExt + Unpin> H264Stream<R> {
 	/// It always returns a NAL unit that only has 2 leading null bytes
 	pub async fn next(&mut self) -> IoResult<H264NalUnit> {
 		loop {
-			if let Some(x) = self.unit_buf.pop_front() {
+			if let Some(x) = self.try_next().await? {
 				return Ok(x);
 			}
+		}
+	}
 
-			let start = self.byte_buf.len();
-			let count = self.reader.read_buf(&mut self.byte_buf).await?;
+	/// Attempts to fetch the next NAL unit in the stream without blocking
+	///
+	/// It always returns a NAL unit that only has 2 leading null bytes
+	pub async fn try_next(&mut self) -> IoResult<Option<H264NalUnit>> {
+		if let Some(x) = self.unit_buf.pop_front() {
+			return Ok(Some(x));
+		}
 
-			// Skip reading the headers at the start of iteration
-			let mut offset = 0;
-			for i in 0..count {
-				let i = start + i - offset;
-				if self.byte_buf[i] == 0x00 {
-					self.nulls += 1;
-					continue;
-				}
+		let start = self.byte_buf.len();
+		let count = self.read_buf().await?;
 
-				let nulls = mem::replace(&mut self.nulls, 0);
-				if nulls >= NAL_UNIT_PREFIX_NULL_BYTES && self.byte_buf[i] == 0x01 {
-					let start = nulls - NAL_UNIT_PREFIX_NULL_BYTES;
-					let end = i - nulls;
+		// Skip reading the headers at the start of iteration
+		let mut offset = 0;
+		for i in 0..count {
+			let i = start + i - offset;
+			if self.byte_buf[i] == 0x00 {
+				self.nulls += 1;
+				return Ok(None);
+			}
 
-					if end > 0 {
-						let (unit, retain) = self.byte_buf.split_at(end);
-						let retain = Vec::from(retain);
-						self.unit_buf.push_back(H264NalUnit::new(Vec::from(&unit[start..])));
-						self.byte_buf.clear();
-						self.byte_buf.extend(retain);
-						offset += end;
-					}
+			let nulls = mem::replace(&mut self.nulls, 0);
+			if nulls >= NAL_UNIT_PREFIX_NULL_BYTES && self.byte_buf[i] == 0x01 {
+				let start = nulls - NAL_UNIT_PREFIX_NULL_BYTES;
+				let end = i - nulls;
+
+				if end > 0 {
+					let (unit, retain) = self.byte_buf.split_at(end);
+					let retain = Vec::from(retain);
+					self.unit_buf.push_back(H264NalUnit::new(Vec::from(&unit[start..])));
+					self.byte_buf.clear();
+					self.byte_buf.extend(retain);
+					offset += end;
 				}
 			}
 		}
+
+		return Ok(None);
 	}
 }
 
