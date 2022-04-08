@@ -7,7 +7,6 @@ use tokio::io::AsyncReadExt;
 use tokio::io::Result as IoResult;
 
 const NAL_UNIT_PREFIX_NULL_BYTES: usize = 2;
-const READ_BEHIND: usize = NAL_UNIT_PREFIX_NULL_BYTES;
 
 /// H.264 stream reader from tokio
 ///
